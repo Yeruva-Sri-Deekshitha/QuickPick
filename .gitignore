@@ -33,3 +33,26 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+# VSCode settings
+.vscode/
+
+# Logs
+logs/
+*.log
+
+# EAS (Expo Application Services) if you're using it
+*.tar.gz
+
+# Build output (just in case)
+build/
+
+# Coverage reports (if you use Jest or any testing tools)
+coverage/
+
+# React Native cache (if any)
+*.keystore
+android/.gradle/
+android/app/build/
+ios/Pods/
+ios/DerivedData/
+
