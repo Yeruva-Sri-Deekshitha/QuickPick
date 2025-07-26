@@ -62,65 +62,48 @@ AS $$
 BEGIN
   RETURN QUERY
   SELECT 
-    u.id as buyer_id,
+    o.buyer_id,
     u.name as buyer_name,
     u.phone as buyer_phone,
-    COUNT(o.id)::INTEGER as total_orders,
-    COALESCE(SUM(d.discounted_price), 0) as total_spent,
+    COUNT(o.id) as total_orders,
+    SUM(d.discounted_price) as total_spent,
     MAX(o.created_at) as last_order_date
-  FROM users u
-  JOIN orders o ON u.id = o.buyer_id
+  FROM orders o
+  JOIN users u ON o.buyer_id = u.id
   JOIN deals d ON o.deal_id = d.id
   WHERE d.vendor_id = vendor_uuid
-    AND o.status IN ('collected', 'reserved')
-  GROUP BY u.id, u.name, u.phone
-  HAVING COUNT(o.id) > 1
-  ORDER BY total_spent DESC, total_orders DESC;
+  GROUP BY o.buyer_id, u.name, u.phone;
 END;
 $$;
 
--- Function to get daily revenue for charts
+-- Function to get vendor daily revenue
 CREATE OR REPLACE FUNCTION get_vendor_daily_revenue(
   vendor_uuid UUID,
-  days_back INTEGER DEFAULT 30
+  days INTEGER DEFAULT 30
 )
 RETURNS TABLE (
   date DATE,
-  revenue NUMERIC,
-  order_count INTEGER
+  revenue NUMERIC
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 BEGIN
   RETURN QUERY
-  WITH date_series AS (
-    SELECT generate_series(
-      CURRENT_DATE - INTERVAL '1 day' * days_back,
-      CURRENT_DATE,
-      INTERVAL '1 day'
-    )::DATE as date
-  )
   SELECT 
-    ds.date,
-    COALESCE(SUM(d.discounted_price), 0) as revenue,
-    COUNT(o.id)::INTEGER as order_count
-  FROM date_series ds
-  LEFT JOIN orders o ON DATE(o.created_at) = ds.date
-  LEFT JOIN deals d ON o.deal_id = d.id AND d.vendor_id = vendor_uuid
-  WHERE o.status IS NULL OR o.status IN ('collected', 'reserved')
-  GROUP BY ds.date
-  ORDER BY ds.date;
+    DATE(o.created_at) as date,
+    SUM(d.discounted_price) as revenue
+  FROM orders o
+  JOIN deals d ON o.deal_id = d.id
+  WHERE d.vendor_id = vendor_uuid
+    AND o.created_at >= (NOW() - INTERVAL '1 day' * days)
+    AND o.status IN ('collected', 'reserved')
+  GROUP BY DATE(o.created_at)
+  ORDER BY date ASC;
 END;
 $$;
 
--- Fix geolocation functions for deal discovery
-
--- Drop old calculate_distance if exists
-DROP FUNCTION IF EXISTS calculate_distance(decimal, decimal, decimal, decimal);
-DROP FUNCTION IF EXISTS calculate_distance(double precision, double precision, double precision, double precision);
-
--- Create new calculate_distance with double precision
+-- Function to calculate distance between two points (Haversine formula)
 CREATE OR REPLACE FUNCTION calculate_distance(
   lat1 double precision, lon1 double precision, lat2 double precision, lon2 double precision
 ) RETURNS double precision AS $$
@@ -145,86 +128,7 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
 -- Drop old get_nearby_deals if exists
-DROP FUNCTION IF EXISTS get_nearby_deals(numeric, numeric, numeric);
-
--- Create new get_nearby_deals with correct type casting and distance column as double precision
-CREATE OR REPLACE FUNCTION get_nearby_deals(
-  user_lat NUMERIC,
-  user_lon NUMERIC,
-  radius_km NUMERIC DEFAULT 5
-)
-RETURNS TABLE (
-  id UUID,
-  vendor_id UUID,
-  item_name TEXT,
-  deal_title TEXT,
-  description TEXT,
-  quantity INTEGER,
-  discount_percent INTEGER,
-  original_price NUMERIC,
-  discounted_price NUMERIC,
-  expiry_time TIMESTAMPTZ,
-  latitude NUMERIC,
-  longitude NUMERIC,
-  location_name TEXT,
-  image_url TEXT,
-  status TEXT,
-  created_at TIMESTAMPTZ,
-  updated_at TIMESTAMPTZ,
-  promo_code TEXT,
-  start_date TIMESTAMPTZ,
-  notify_customers BOOLEAN,
-  repeat_buyers_only BOOLEAN,
-  vendor_name TEXT,
-  distance DOUBLE PRECISION
-)
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-BEGIN
-  RETURN QUERY
-  SELECT 
-    d.id,
-    d.vendor_id,
-    d.item_name,
-    d.deal_title,
-    d.description,
-    d.quantity,
-    d.discount_percent,
-    d.original_price,
-    d.discounted_price,
-    d.expiry_time,
-    d.latitude,
-    d.longitude,
-    d.location_name,
-    d.image_url,
-    d.status,
-    d.created_at,
-    d.updated_at,
-    d.promo_code,
-    d.start_date,
-    d.notify_customers,
-    d.repeat_buyers_only,
-    u.name as vendor_name,
-    calculate_distance(
-      user_lat::double precision,
-      user_lon::double precision,
-      d.latitude::double precision,
-      d.longitude::double precision
-    ) as distance
-  FROM deals d
-  JOIN users u ON d.vendor_id = u.id
-  WHERE d.status = 'active'
-    AND d.expiry_time > NOW()
-    AND calculate_distance(
-      user_lat::double precision,
-      user_lon::double precision,
-      d.latitude::double precision,
-      d.longitude::double precision
-    ) <= radius_km
-  ORDER BY distance ASC, d.created_at DESC;
-END;
-$$;
+-- (Removed function redefinition for get_nearby_deals)
 
 -- Function to get nearby vendors within a radius (5km default)
 DROP FUNCTION IF EXISTS get_nearby_vendors(numeric, numeric, numeric);
@@ -251,7 +155,7 @@ BEGIN
   RETURN QUERY
   SELECT 
     v.user_id,
-    v.full_name,
+    u.name as full_name,
     v.shop_name,
     v.vendor_type,
     v.latitude,
@@ -264,13 +168,29 @@ BEGIN
       v.longitude::double precision
     ) as distance
   FROM vendor_profile v
-  WHERE v.latitude IS NOT NULL AND v.longitude IS NOT NULL
-    AND calculate_distance(
+  JOIN users u ON v.user_id = u.id
+  WHERE calculate_distance(
       user_lat::double precision,
       user_lon::double precision,
       v.latitude::double precision,
       v.longitude::double precision
-    ) <= radius_km
-  ORDER BY distance ASC;
+    ) <= radius_km;
 END;
 $$;
+
+-- Add quantity_unit and remaining_quantity to deals table
+ALTER TABLE deals 
+ADD COLUMN quantity_unit text NOT NULL DEFAULT 'items',
+ADD COLUMN remaining_quantity integer NOT NULL DEFAULT 0;
+
+-- Update existing deals to set remaining_quantity equal to quantity
+UPDATE deals SET remaining_quantity = quantity WHERE remaining_quantity = 0;
+
+-- Add constraint to ensure remaining_quantity doesn't exceed quantity
+ALTER TABLE deals 
+ADD CONSTRAINT remaining_quantity_check 
+CHECK (remaining_quantity >= 0 AND remaining_quantity <= quantity);
+
+-- Update the deals table comment
+COMMENT ON COLUMN deals.quantity_unit IS 'Unit of measurement for quantity (custom units allowed)';
+COMMENT ON COLUMN deals.remaining_quantity IS 'Current available quantity (cannot exceed original quantity)';
