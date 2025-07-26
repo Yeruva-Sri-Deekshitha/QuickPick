@@ -34,14 +34,16 @@ export default function DealCard({ deal, onPress, showDistance = true }: DealCar
         <View style={styles.details}>
           <View style={styles.priceContainer}>
             <Text style={styles.originalPrice}>₹{deal.original_price.toFixed(2)}</Text>
-            <Text style={styles.discountedPrice}>₹{deal.discounted_price.toFixed(2)}</Text>
+            <Text style={styles.discountedPrice}>₹{deal.discounted_price.toFixed(2)} per 1 {deal.quantity_unit}</Text>
             <Text style={styles.savings}>Save ₹{savings.toFixed(2)}</Text>
           </View>
 
           <View style={styles.metaInfo}>
             <View style={styles.quantity}>
               <Package color="#6B7280" size={14} />
-              <Text style={styles.quantityText}>{deal.quantity} left</Text>
+              <Text style={styles.quantityText}>
+                {deal.remaining_quantity}/{deal.quantity} {deal.quantity_unit} left
+              </Text>
             </View>
 
             {showDistance && (deal.distance_km !== undefined || deal.distance !== undefined) && (
