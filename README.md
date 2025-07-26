@@ -18,8 +18,9 @@ Built with **React Native (Expo)** and **Supabase**, the app connects people in 
 
 **Vendors:**
 - Post last-minute food deals with images, discounts, expiry
-- View and manage active/expired deals from their dashboard
-- Track buyer engagement and real-time changes (WIP)
+- View and manage active  deals from their dashboard
+- Update deal quantities and status (active/sold/expired) instantly
+
 
 ---
 
