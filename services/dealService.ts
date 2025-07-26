@@ -6,6 +6,8 @@ export interface Deal {
   vendor_id: string;
   item_name: string;
   quantity: number;
+  quantity_unit: string;
+  remaining_quantity: number;
   discount_percent: number;
   original_price: number;
   discounted_price: number;
@@ -31,6 +33,19 @@ export interface DealResponse {
   deals?: Deal[];
 }
 
+export interface CreateDealData {
+  deal_title?: string;
+  item_name: string;
+  description?: string;
+  quantity: number;
+  quantity_unit: string;
+  discount_percent: number;
+  original_price: number;
+  start_date: string;
+  expiry_time: string;
+  image_url?: string;
+}
+
 export class DealService {
   /**
    * GET nearby deals using Supabase stored procedure
@@ -48,12 +63,17 @@ export class DealService {
         return { success: false, message: 'Failed to load nearby deals' };
       }
 
+      // Filter only active deals
+      const activeDeals = (data || []).filter((deal: any) => deal.status === 'active');
+
       // Map the response to the Deal interface
-      const deals = (data || []).map((deal: any) => ({
+      const deals = activeDeals.map((deal: any) => ({
         id: deal.id,
         vendor_id: deal.vendor_id,
         item_name: deal.item_name,
         quantity: deal.quantity,
+        quantity_unit: deal.quantity_unit || 'items', // Default to 'items' if not provided
+        remaining_quantity: deal.remaining_quantity || deal.quantity || 0, // Default to total quantity or 0
         discount_percent: deal.discount_percent,
         original_price: deal.original_price,
         discounted_price: deal.discounted_price,
@@ -98,6 +118,8 @@ export class DealService {
           item_name: dealData.item_name,
           description: dealData.description,
           quantity: dealData.quantity,
+          quantity_unit: dealData.quantity_unit,
+          remaining_quantity: dealData.quantity, // Initially equal to total quantity
           discount_percent: dealData.discount_percent,
           original_price: dealData.original_price,
           discounted_price,
@@ -218,6 +240,47 @@ export class DealService {
   }
 
   /**
+   * GET vendor profile by vendor_id
+   */
+  static async getVendorProfileById(vendorId: string) {
+    try {
+      // Fetch vendor profile
+      const { data: vendorProfile, error: profileError } = await supabase
+        .from('vendor_profile')
+        .select('shop_name, location_name')
+        .eq('user_id', vendorId)
+        .single();
+
+      if (profileError || !vendorProfile) {
+        return { success: false, message: 'Vendor profile not found' };
+      }
+
+      // Fetch user for phone number
+      const { data: user, error: userError } = await supabase
+        .from('users')
+        .select('phone')
+        .eq('id', vendorId)
+        .single();
+
+      if (userError || !user) {
+        return { success: false, message: 'Vendor user not found' };
+      }
+
+      // Combine results
+      return {
+        success: true,
+        vendor: {
+          shop_name: vendorProfile.shop_name,
+          location_name: vendorProfile.location_name,
+          phone: user.phone,
+        }
+      };
+    } catch (error) {
+      return { success: false, message: 'Failed to load vendor profile' };
+    }
+  }
+
+  /**
    * Subscribe to real-time deal updates
    */
   static subscribeToDeals(callback: (payload: any) => void) {
@@ -245,5 +308,56 @@ export class DealService {
     const minutes = Math.floor((total / 1000 / 60) % 60);
     const hours = Math.floor(total / (1000 * 60 * 60));
     return { hours, minutes, seconds, total };
+  }
+
+  /**
+   * UPDATE deal quantity (for vendors)
+   */
+  static async updateDealQuantity(dealId: string, remainingQuantity: number): Promise<DealResponse> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return { success: false, message: 'User not authenticated' };
+
+      // First get the deal to validate the quantity
+      const { data: existingDeal, error: fetchError } = await supabase
+        .from('deals')
+        .select('quantity, vendor_id')
+        .eq('id', dealId)
+        .single();
+
+      if (fetchError || !existingDeal) {
+        return { success: false, message: 'Deal not found' };
+      }
+
+      // Check if user owns this deal
+      if (existingDeal.vendor_id !== user.id) {
+        return { success: false, message: 'You can only update your own deals' };
+      }
+
+      // Validate remaining quantity
+      if (remainingQuantity < 0 || remainingQuantity > existingDeal.quantity) {
+        return { success: false, message: `Remaining quantity must be between 0 and ${existingDeal.quantity}` };
+      }
+
+      const { data, error } = await supabase
+        .from('deals')
+        .update({ 
+          remaining_quantity: remainingQuantity,
+          status: remainingQuantity === 0 ? 'sold' : 'active'
+        })
+        .eq('id', dealId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Update deal quantity error:', error);
+        return { success: false, message: 'Failed to update deal quantity' };
+      }
+
+      return { success: true, message: 'Deal quantity updated successfully!', deal: data };
+    } catch (error) {
+      console.error('Unexpected error in updateDealQuantity:', error);
+      return { success: false, message: 'Unexpected error while updating deal quantity' };
+    }
   }
 }
