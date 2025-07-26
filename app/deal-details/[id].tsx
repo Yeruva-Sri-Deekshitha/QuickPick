@@ -7,12 +7,14 @@ import {
   Alert,
   Image,
   TouchableOpacity,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { DealService, Deal } from '@/services/dealService';
-import { OrderService } from '@/services/orderService';
+
 import { useAuth } from '@/contexts/AuthContext';
+import * as Linking from 'expo-linking';
 import { 
   ArrowLeft,
   MapPin,
@@ -26,19 +28,163 @@ import {
 import Button from '@/components/ui/Button';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import CountdownTimer from '@/components/ui/CountdownTimer';
+import Dialog from 'react-native-dialog';
 
 export default function DealDetailsScreen() {
-  const { id } = useLocalSearchParams();
+  const { id, from } = useLocalSearchParams();
   const { user } = useAuth();
   const [deal, setDeal] = useState<Deal | null>(null);
   const [loading, setLoading] = useState(true);
   const [reserving, setReserving] = useState(false);
+  const [vendor, setVendor] = useState<any>(null);
+  const [backPressCount, setBackPressCount] = useState(0);
+  const [dialogVisible, setDialogVisible] = useState(false);
+  const [dialogValue, setDialogValue] = useState('');
+  const [dialogError, setDialogError] = useState('');
+
+  // Determine where to go back based on user role or from parameter
+  const getBackDestination = () => {
+    // If from parameter is provided, use it
+    if (from === 'buyer') {
+      return '/(buyer)/buyer';
+    } else if (from === 'vendor') {
+      return '/(vendor)/vendor';
+    }
+    
+    // Otherwise use user role
+    if (user?.profile.role === 'buyer') {
+      return '/(buyer)/buyer';
+    } else if (user?.profile.role === 'vendor') {
+      return '/(vendor)/vendor';
+    }
+    
+    return '/auth';
+  };
+
+  const handleBackPress = () => {
+    // Increment back press count
+    const newCount = backPressCount + 1;
+    setBackPressCount(newCount);
+
+    // If this is the first back press, go back to previous screen
+    if (newCount === 1) {
+      // Check if we can go back in navigation stack
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        // Fallback navigation to correct destination
+        const destination = getBackDestination();
+        router.replace(destination);
+      }
+      
+      // Reset count after 2 seconds
+      setTimeout(() => {
+        setBackPressCount(0);
+      }, 2000);
+      
+      return;
+    }
+
+    // If multiple back presses, ask to exit app
+    if (newCount >= 2) {
+      Alert.alert(
+        'Exit App',
+        'Do you want to exit the app?',
+        [
+          {
+            text: 'Cancel',
+            onPress: () => {
+              setBackPressCount(0); // Reset count
+            },
+            style: 'cancel',
+          },
+          {
+            text: 'Exit',
+            onPress: () => {
+              BackHandler.exitApp();
+            },
+            style: 'destructive',
+          },
+        ]
+      );
+      setBackPressCount(0); // Reset count
+    }
+  };
+
+  const handleBackButtonPress = () => {
+    // This is for the header back button (single press)
+    // Check if we can go back in navigation stack
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      // Fallback navigation to correct destination
+      const destination = getBackDestination();
+      router.replace(destination);
+    }
+  };
+
+  const handleEditQuantity = () => {
+    if (!deal) return;
+    setDialogValue(deal.remaining_quantity.toString());
+    setDialogError('');
+    setDialogVisible(true);
+  };
+
+  const handleDialogCancel = () => {
+    setDialogVisible(false);
+    setDialogValue('');
+    setDialogError('');
+  };
+
+  const handleDialogConfirm = async () => {
+    if (!deal) return;
+    const quantity = parseInt(dialogValue);
+    if (isNaN(quantity) || quantity < 0 || quantity > deal.quantity) {
+      setDialogError(`Quantity must be between 0 and ${deal.quantity}`);
+      return;
+    }
+    try {
+      const response = await DealService.updateDealQuantity(deal.id, quantity);
+      if (response.success) {
+        Alert.alert('Success', 'Quantity updated successfully!');
+        loadDealDetails();
+        handleDialogCancel();
+      } else {
+        setDialogError(response.message);
+      }
+    } catch (error) {
+      setDialogError('Failed to update quantity');
+    }
+  };
 
   useEffect(() => {
+    // Check authentication before loading
+    if (!user) {
+      router.replace('/auth');
+      return;
+    }
+    
     if (id) {
       loadDealDetails();
     }
-  }, [id]);
+
+    // Handle back button press
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleBackPress();
+      return true; // Prevent default back behavior
+    });
+
+    return () => {
+      backHandler.remove();
+    };
+  }, [id, user, backPressCount]);
+
+  // Redirect if user becomes unauthenticated
+  useEffect(() => {
+    if (!user) {
+      router.replace('/auth');
+    }
+  }, [user]);
 
   const loadDealDetails = async () => {
     try {
@@ -46,6 +192,13 @@ export default function DealDetailsScreen() {
       
       if (response.success && response.deal) {
         setDeal(response.deal);
+        // Fetch vendor details
+        if (response.deal.vendor_id) {
+          const vendorRes = await DealService.getVendorProfileById(response.deal.vendor_id);
+          if (vendorRes.success) {
+            setVendor(vendorRes.vendor);
+          }
+        }
       } else {
         Alert.alert('Error', response.message);
         router.back();
@@ -56,47 +209,6 @@ export default function DealDetailsScreen() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleReserveDeal = async () => {
-    if (!user) {
-      Alert.alert('Login Required', 'Please login to reserve deals');
-      return;
-    }
-
-    if (user.profile.role !== 'buyer') {
-      Alert.alert('Access Denied', 'Only buyers can reserve deals');
-      return;
-    }
-
-    Alert.alert(
-      'Reserve Deal',
-      'Are you sure you want to reserve this deal?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reserve',
-          onPress: async () => {
-            setReserving(true);
-            try {
-              const response = await OrderService.createOrder(id as string);
-              
-              if (response.success) {
-                Alert.alert('Success!', 'Deal reserved successfully!', [
-                  { text: 'OK', onPress: () => router.back() }
-                ]);
-              } else {
-                Alert.alert('Error', response.message);
-              }
-            } catch (error) {
-              Alert.alert('Error', 'Failed to reserve deal');
-            } finally {
-              setReserving(false);
-            }
-          }
-        }
-      ]
-    );
   };
 
   if (loading) {
@@ -111,17 +223,13 @@ export default function DealDetailsScreen() {
     );
   }
 
-  // Debug: Log the image URL
-  console.log('Deal image_url:', deal.image_url);
-
   const savings = deal.original_price - deal.discounted_price;
   const isExpired = new Date(deal.expiry_time) <= new Date();
-  const canReserve = user?.profile.role === 'buyer' && deal.status === 'active' && !isExpired;
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={handleBackButtonPress}>
           <ArrowLeft color="#111827" size={24} />
         </TouchableOpacity>
         <Text style={styles.title}>Deal Details</Text>
@@ -160,19 +268,18 @@ export default function DealDetailsScreen() {
           <Text style={styles.cardTitle}>Pricing</Text>
           <View style={styles.priceContainer}>
             <Text style={styles.originalPrice}>
-    ₹{typeof deal.original_price === 'number' ? deal.original_price.toFixed(2) : 'N/A'}
-  </Text>
+              ₹{typeof deal.original_price === 'number' ? deal.original_price.toFixed(2) : 'N/A'}
+            </Text>
             <Text style={styles.discountedPrice}>
-    ₹{typeof deal.discounted_price === 'number' ? deal.discounted_price.toFixed(2) : 'N/A'}
-  </Text>
+              ₹{typeof deal.discounted_price === 'number' ? deal.discounted_price.toFixed(2) : 'N/A'} per 1 {deal.quantity_unit}
+            </Text>
           </View>
           <Text style={styles.savings}>
-  You save ₹
-  {typeof deal.original_price === 'number' && typeof deal.discounted_price === 'number'
-    ? (deal.original_price - deal.discounted_price).toFixed(2)
-    : '0.00'}
-</Text>
-          
+            You save ₹
+            {typeof deal.original_price === 'number' && typeof deal.discounted_price === 'number'
+              ? (deal.original_price - deal.discounted_price).toFixed(2)
+              : '0.00'}
+          </Text>
         </View>
 
         {/* Deal Info */}
@@ -181,7 +288,19 @@ export default function DealDetailsScreen() {
           
           <View style={styles.infoRow}>
             <Package color="#6B7280" size={20} />
-            <Text style={styles.infoText}>{deal.quantity} items available</Text>
+            <View style={styles.quantityInfo}>
+              <Text style={styles.infoText}>
+                {deal.remaining_quantity}/{deal.quantity} {deal.quantity_unit} available
+              </Text>
+              {user?.profile.role === 'vendor' && deal.status === 'active' && !isExpired && (
+                <TouchableOpacity
+                  style={styles.editQuantityButton}
+                  onPress={() => handleEditQuantity()}
+                >
+                  <Text style={styles.editQuantityText}>Edit Quantity</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
 
           <View style={styles.infoRow}>
@@ -192,36 +311,54 @@ export default function DealDetailsScreen() {
             </View>
           </View>
 
-         <View style={styles.infoRow}>
-  <MapPin color="#6B7280" size={20} />
-  <Text style={styles.infoText}>
-    {deal.location_name
-      ? deal.location_name
-      : 'This deal does not include a location'}
-  </Text>
-</View>
+          <View style={styles.infoRow}>
+            <MapPin color="#6B7280" size={20} />
+            <Text style={styles.infoText}>
+              {deal.location_name
+                ? deal.location_name
+                : 'This deal does not include a location'}
+            </Text>
+          </View>
 
-          {deal.distance !== undefined && (
+          {typeof deal.distance_km === 'number' && (
             <View style={styles.infoRow}>
               <MapPin color="#6B7280" size={20} />
               <Text style={styles.infoText}>
-                {deal.distance < 1
-                  ? `${Math.round(deal.distance * 1000)}m away`
-                  : `${deal.distance.toFixed(1)}km away`
+                {deal.distance_km < 1
+                  ? `${Math.round(deal.distance_km * 1000)}m away`
+                  : `${deal.distance_km.toFixed(1)}km away`
                 }
               </Text>
             </View>
           )}
         </View>
 
-        {/* Vendor Info */}
-        <View style={styles.vendorCard}>
-          <Text style={styles.cardTitle}>Vendor</Text>
-          <View style={styles.vendorInfo}>
-            <User color="#F97316" size={24} />
-            <Text style={styles.vendorName}>{deal.vendor_name}</Text>
+        {/* Vendor Info - Visible to both buyers and vendors */}
+        {vendor && (
+          <View style={styles.vendorCard}>
+            <Text style={styles.cardTitle}>Vendor</Text>
+            <View style={styles.vendorInfo}>
+              <User color="#F97316" size={24} />
+              <View>
+                <Text style={styles.vendorDetail}>Shop: {vendor?.shop_name || 'Not available'}</Text>
+                <Text style={styles.vendorDetail}>Phone: {vendor?.phone || 'Not available'}</Text>
+                <Text style={styles.vendorDetail}>Address: {vendor?.location_name || 'Not available'}</Text>
+              </View>
+            </View>
+
+            {/* Only for buyers: Call Vendor */}
+            {user?.profile.role === 'buyer' && vendor?.phone && (
+              <View style={styles.buyerActions}>
+                <TouchableOpacity
+                  style={styles.callButton}
+                  onPress={() => Linking.openURL(`tel:${vendor.phone}`)}
+                >
+                  <Text style={styles.callButtonText}>Call Vendor</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
-        </View>
+        )}
 
         {/* Status */}
         <View style={styles.statusCard}>
@@ -236,23 +373,11 @@ export default function DealDetailsScreen() {
           </Text>
         </View>
 
-        {/* Reserve Button */}
-        {canReserve && (
-          <View style={styles.actions}>
-            <Button
-              title="Reserve This Deal"
-              onPress={handleReserveDeal}
-              loading={reserving}
-              size="large"
-              icon={<ShoppingBag color="#ffffff" size={20} />}
-            />
-          </View>
-        )}
-
-        {!canReserve && deal.status === 'active' && !isExpired && user?.profile.role === 'vendor' && (
+        {/* Vendor note for vendors only */}
+        {user?.profile.role === 'vendor' && deal.status === 'active' && !isExpired && (
           <View style={styles.vendorNote}>
             <Text style={styles.vendorNoteText}>
-              This is your deal. Buyers can see and reserve it.
+              This is your deal. Buyers can see it.
             </Text>
           </View>
         )}
@@ -263,6 +388,20 @@ export default function DealDetailsScreen() {
           </View>
         )}
       </ScrollView>
+      <Dialog.Container visible={dialogVisible}>
+        <Dialog.Title>Update Remaining Quantity</Dialog.Title>
+        <Dialog.Description>
+          Enter the remaining quantity (0-{deal?.quantity ?? 0}):
+        </Dialog.Description>
+        <Dialog.Input
+          value={dialogValue}
+          onChangeText={setDialogValue}
+          keyboardType="numeric"
+        />
+        {!!dialogError && <Text style={{ color: 'red', marginTop: 4 }}>{dialogError}</Text>}
+        <Dialog.Button label="Cancel" onPress={handleDialogCancel} />
+        <Dialog.Button label="Update" onPress={handleDialogConfirm} />
+      </Dialog.Container>
     </SafeAreaView>
   );
 }
@@ -364,19 +503,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 12,
   },
-  promoCode: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#FEF3C7',
-    padding: 8,
-    borderRadius: 8,
-  },
-  promoCodeText: {
-    fontSize: 14,
-    color: '#F97316',
-    fontWeight: '600',
-  },
   infoCard: {
     backgroundColor: '#ffffff',
     padding: 20,
@@ -408,10 +534,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
-  vendorName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
+  vendorDetail: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginTop: 2,
   },
   statusCard: {
     backgroundColor: '#ffffff',
@@ -437,9 +563,6 @@ const styles = StyleSheet.create({
   },
   expiredStatus: {
     color: '#EF4444',
-  },
-  actions: {
-    padding: 20,
   },
   vendorNote: {
     backgroundColor: '#DBEAFE',
@@ -470,4 +593,47 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 50,
   },
-});
+  buyerActions: {
+    marginTop: 16,
+    gap: 12,
+  },
+  actionButton: {
+    backgroundColor: '#E0F2FE',
+    padding: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  actionButtonText: {
+    color: '#0284C7',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  callButton: {
+    backgroundColor: '#DCFCE7',
+    padding: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  callButtonText: {
+    color: '#16A34A',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  quantityInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  editQuantityButton: {
+    backgroundColor: '#F97316',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  editQuantityText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+}); 

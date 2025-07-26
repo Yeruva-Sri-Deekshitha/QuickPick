@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, Modal, BackHandler } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { LogOut, User, MapPin } from 'lucide-react-native';
@@ -21,12 +21,70 @@ export default function BuyerProfileScreen() {
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [vendors, setVendors] = useState<any[]>([]);
+  const [backPressCount, setBackPressCount] = useState(0);
 
   useEffect(() => {
-    if (!user) return;
+    // Check authentication before loading
+    if (!user) {
+      router.replace('/auth');
+      return;
+    }
+    
     fetchProfile();
     fetchPhone();
   }, [user]);
+
+  // Redirect if user becomes unauthenticated
+  useEffect(() => {
+    if (!user) {
+      router.replace('/auth');
+    }
+  }, [user]);
+
+  useEffect(() => {
+    // Handle back button press with exit confirmation
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      console.log('Back button pressed in buyer profile');
+      
+      // If we're in a nested screen, let it go back normally
+      if (router.canGoBack()) {
+        router.back();
+        return true;
+      }
+      
+      // From profile screen, handle exit confirmation
+      if (backPressCount === 0) {
+        setBackPressCount(1);
+        Alert.alert(
+          'Exit App',
+          'Press back again to exit the app',
+          [
+            {
+              text: 'Cancel',
+              onPress: () => setBackPressCount(0),
+              style: 'cancel',
+            },
+          ],
+          { cancelable: false }
+        );
+        
+        // Reset back press count after 2 seconds
+        setTimeout(() => {
+          setBackPressCount(0);
+        }, 2000);
+        
+        return true;
+      } else {
+        // Exit the app
+        BackHandler.exitApp();
+        return true;
+      }
+    });
+
+    return () => {
+      backHandler.remove();
+    };
+  }, [backPressCount]);
 
   useEffect(() => {
     if (location) {
@@ -105,7 +163,7 @@ export default function BuyerProfileScreen() {
           onPress: async () => {
             try {
               await logout();
-              router.replace('/');
+              router.replace('/auth');
             } catch (error) {
               Alert.alert('Error', 'Failed to logout');
             }
@@ -271,17 +329,20 @@ const styles = StyleSheet.create({
   },
   infoItem: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 12,
   },
   infoLabel: {
     fontWeight: '600',
     color: '#374151',
     marginRight: 8,
+    minWidth: 80,
   },
   infoText: {
     fontSize: 16,
     color: '#6b7280',
+    flex: 1,
+    flexWrap: 'wrap',
   },
   input: {
     borderWidth: 1,

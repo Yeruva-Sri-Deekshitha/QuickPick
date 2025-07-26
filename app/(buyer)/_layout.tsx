@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { ShoppingBag, Package, User } from 'lucide-react-native';
+import { ShoppingBag, User } from 'lucide-react-native';
 
 export default function BuyerLayout() {
   return (
@@ -13,10 +13,6 @@ export default function BuyerLayout() {
       <Tabs.Screen
         name="buyer"
         options={{ title: 'Discover', tabBarIcon: ({ color, size }) => <ShoppingBag color={color} size={size} /> }}
-      />
-      <Tabs.Screen
-        name="buyer-orders"
-        options={{ title: 'My Orders', tabBarIcon: ({ color, size }) => <Package color={color} size={size} /> }}
       />
       <Tabs.Screen
         name="profile"

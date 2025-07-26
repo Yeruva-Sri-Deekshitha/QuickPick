@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Alert, TouchableOpacity, Image,
-  KeyboardAvoidingView, Platform
+  KeyboardAvoidingView, Platform, BackHandler
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -15,13 +15,16 @@ import {
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function PostDealScreen() {
+  const { user } = useAuth();
   const [formData, setFormData] = useState<CreateDealData>({
     deal_title: '',
     item_name: '',
     description: '',
     quantity: 1,
+    quantity_unit: 'items',
     discount_percent: 10,
     original_price: 0,
     start_date: new Date().toISOString(),
@@ -34,12 +37,73 @@ export default function PostDealScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
+  const [backPressCount, setBackPressCount] = useState(0);
+
+  // Check authentication
+  useEffect(() => {
+    if (!user) {
+      router.replace('/auth');
+    }
+  }, [user]);
+
+  // Redirect if user becomes unauthenticated
+  useEffect(() => {
+    if (!user) {
+      router.replace('/auth');
+    }
+  }, [user]);
+
+  // Handle back button press with exit confirmation
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      console.log('Back button pressed in post-deal screen');
+      
+      // If we're in a nested screen (like deal details), let it go back normally
+      if (router.canGoBack()) {
+        router.back();
+        return true;
+      }
+      
+      // From post-deal screen, handle exit confirmation
+      if (backPressCount === 0) {
+        setBackPressCount(1);
+        Alert.alert(
+          'Exit App',
+          'Press back again to exit the app',
+          [
+            {
+              text: 'Cancel',
+              onPress: () => setBackPressCount(0),
+              style: 'cancel',
+            },
+          ],
+          { cancelable: false }
+        );
+        
+        // Reset back press count after 2 seconds
+        setTimeout(() => {
+          setBackPressCount(0);
+        }, 2000);
+        
+        return true;
+      } else {
+        // Exit the app
+        BackHandler.exitApp();
+        return true;
+      }
+    });
+
+    return () => {
+      backHandler.remove();
+    };
+  }, [backPressCount]);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
 
     if (!formData.item_name.trim()) newErrors.item_name = 'Item name is required';
     if (formData.quantity < 1) newErrors.quantity = 'Quantity must be at least 1';
+    if (!formData.quantity_unit.trim()) newErrors.quantity_unit = 'Unit is required';
     if (formData.discount_percent < 0 || formData.discount_percent > 100) {
       newErrors.discount_percent = 'Discount must be between 0-100%';
     }
@@ -61,7 +125,6 @@ export default function PostDealScreen() {
       if (result && !result.canceled && result.assets && result.assets.length > 0 && result.assets[0].uri) {
         setPreviewUri(result.assets[0].uri); // Show local preview immediately
         const uploadResponse = await ImageService.uploadImage(result.assets[0].uri);
-        console.log('Image upload result:', uploadResponse); // <--- Added log
         if (uploadResponse.success && uploadResponse.url && uploadResponse.url.startsWith('http')) {
           setFormData(prev => ({ ...prev, image_url: uploadResponse.url! }));
           // Do NOT set previewUri to Supabase URL; keep showing local preview until user picks a new image
@@ -82,10 +145,17 @@ export default function PostDealScreen() {
     setLoading(true);
     try {
       // Fetch vendor location from vendor_profile
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert('Error', 'User not authenticated');
+        setLoading(false);
+        return;
+      }
+      
       const { data: vendorProfile, error: profileError } = await supabase
         .from('vendor_profile')
         .select('latitude, longitude')
-        .eq('user_id', (await supabase.auth.getUser()).data.user.id)
+        .eq('user_id', user.id)
         .single();
       if (profileError || !vendorProfile || vendorProfile.latitude == null || vendorProfile.longitude == null) {
         Alert.alert('Error', 'Please set your shop location in your profile before posting a deal.');
@@ -107,7 +177,6 @@ export default function PostDealScreen() {
         longitude: vendorProfile.longitude,
         location_name: locationName
       };
-      console.log('Creating deal with payload:', dealPayload); // <--- Added log
       const response = await DealService.createDeal(dealPayload);
       if (response.success) {
         Alert.alert('Success!', 'Deal posted successfully!', [
@@ -179,13 +248,25 @@ export default function PostDealScreen() {
               <View style={styles.halfWidth}>
                 <Input
                   label="Quantity *"
-                  placeholder="e.g., 5 kg"
+                  placeholder="e.g., 5"
                   value={formData.quantity.toString()}
-                  onChangeText={(value) => updateFormData('quantity', value)}
-                  keyboardType="default"
+                  onChangeText={(value) => updateFormData('quantity', parseInt(value) || 0)}
+                  keyboardType="numeric"
                   error={errors.quantity}
                 />
               </View>
+              <View style={styles.halfWidth}>
+                <Input
+                  label="Unit *"
+                  placeholder="e.g., kg, pieces, boxes"
+                  value={formData.quantity_unit}
+                  onChangeText={(value) => updateFormData('quantity_unit', value)}
+                  error={errors.quantity_unit}
+                />
+              </View>
+            </View>
+
+            <View style={styles.row}>
               <View style={styles.halfWidth}>
                 <Input
                   label="Discount % *"
@@ -197,22 +278,25 @@ export default function PostDealScreen() {
                   error={errors.discount_percent}
                 />
               </View>
+              <View style={styles.halfWidth}>
+                <Input
+                  label={`Price per ${formData.quantity_unit || 'unit'} (₹) *`}
+                  placeholder="100.00"
+                  value={formData.original_price.toString()}
+                  onChangeText={(value) => {
+                    if (value === '') {
+                      updateFormData('original_price', 0);
+                    } else {
+                      updateFormData('original_price', parseFloat(value));
+                    }
+                  }}
+                  keyboardType="numeric"
+                  error={errors.original_price}
+                />
+              </View>
             </View>
 
-            <Input
-  label="Original Price (₹) *"
-  placeholder="100.00"
-  value={formData.original_price.toString()}
-  onChangeText={(value) => {
-  if (value === '') {
-    updateFormData('original_price', 0); // or optionally keep it empty in state
-  } else {
-    updateFormData('original_price', parseFloat(value));
-  }
-}}
-  keyboardType="numeric"
-  error={errors.original_price}
-/>
+
 
             {formData.original_price > 0 && (
               <View style={styles.pricePreview}>
@@ -409,4 +493,5 @@ const styles = StyleSheet.create({
   changeImageText: { color: '#374151' },
   imageButtons: { gap: 12 },
   actions: { marginTop: 24 },
+
 });

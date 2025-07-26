@@ -7,6 +7,7 @@ import {
   RefreshControl,
   Alert,
   TouchableOpacity,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -17,14 +18,56 @@ import DealCard from '@/components/ui/DealCard';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import Button from '@/components/ui/Button';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/contexts/AuthContext';
+import { useFocusEffect } from '@react-navigation/native';
 
 export default function BuyerScreen() {
+  const { user } = useAuth();
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [userLocation, setUserLocation] = useState<LocationCoords | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
   const [profileLocation, setProfileLocation] = useState<LocationCoords | null>(null);
+  const [backPressCount, setBackPressCount] = useState(0);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBackPress = () => {
+        if (backPressCount === 0) {
+          setBackPressCount(1);
+          Alert.alert(
+            'Exit App',
+            'Press back again to exit the app',
+            [
+              {
+                text: 'Cancel',
+                onPress: () => setBackPressCount(0),
+                style: 'cancel',
+              },
+              {
+                text: 'Exit',
+                onPress: () => BackHandler.exitApp(),
+                style: 'destructive',
+              },
+            ],
+            { cancelable: false }
+          );
+          setTimeout(() => setBackPressCount(0), 2000);
+          return true;
+        } else {
+          BackHandler.exitApp();
+          return true;
+        }
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
+      return () => {
+        subscription.remove();
+      };
+    }, [backPressCount])
+  );
 
   useEffect(() => {
     fetchBuyerProfileLocation();
@@ -32,14 +75,20 @@ export default function BuyerScreen() {
     
     // Subscribe to real-time deal updates
     const subscription = DealService.subscribeToDeals((payload) => {
-      console.log('Deal update:', payload);
       loadDeals();
     });
 
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
+  }, [user]);
+
+  // Redirect if user becomes unauthenticated
+  useEffect(() => {
+    if (!user) {
+      router.replace('/auth');
+    }
+  }, [user]);
 
   const fetchBuyerProfileLocation = async () => {
     // Fetch the buyer's saved profile location from buyer_profile
@@ -65,7 +114,6 @@ export default function BuyerScreen() {
       return;
     }
     const locationResponse = await LocationService.getCurrentLocation();
-    console.log('Buyer current location:', locationResponse);
     if (locationResponse.success && locationResponse.coords) {
       setUserLocation(locationResponse.coords);
       await loadDeals(locationResponse.coords);
@@ -83,17 +131,13 @@ export default function BuyerScreen() {
     try {
       const coords = location || userLocation;
       if (!coords) return;
-      console.log('Loading deals for coords:', coords);
       const response = await DealService.getNearbyDeals(coords);
-      console.log('Nearby deals response:', response);
       if (response.success && response.deals) {
         setDeals(response.deals);
-        console.log('Deals set in state:', response.deals);
       } else {
         Alert.alert('Error', response.message);
       }
     } catch (error) {
-      console.error('Load deals error:', error);
       Alert.alert('Error', 'Failed to load deals');
     } finally {
       setLoading(false);
@@ -108,8 +152,8 @@ export default function BuyerScreen() {
 
   const handleDealPress = (deal: Deal) => {
     router.push({
-      pathname: '/deal-details',
-      params: { dealId: deal.id }
+      pathname: '/deal-details/[id]',
+      params: { id: deal.id, from: 'buyer' }
     });
   };
 

@@ -15,7 +15,6 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="(vendor)" />
         <Stack.Screen name="(buyer)" />
-        <Stack.Screen name="post-deal" />
         <Stack.Screen name="deal-details/[id]" />
         <Stack.Screen name="+not-found" />
       </Stack>

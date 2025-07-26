@@ -1,17 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, Modal, BackHandler } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { User, LogOut, Store, ShoppingBag, Phone, Mail, MapPin } from 'lucide-react-native';
+import { LogOut, User, MapPin, Mail, Phone, Store } from 'lucide-react-native';
 import Button from '@/components/ui/Button';
 import MapView, { Marker } from 'react-native-maps';
 import { supabase } from '@/lib/supabase';
 import * as Location from 'expo-location';
+import { router } from 'expo-router';
 import { LocationService } from '@/services/locationService';
 
 export default function ProfileScreen() {
-  const { user, logout, loading } = useAuth();
+  const { user, logout } = useAuth();
   const [profile, setProfile] = useState<any>(null);
   const [editing, setEditing] = useState(false);
   const [fullName, setFullName] = useState('');
@@ -20,15 +20,71 @@ export default function ProfileScreen() {
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [mapVisible, setMapVisible] = useState(false);
   const [gettingLocation, setGettingLocation] = useState(false);
+  const [phone, setPhone] = useState(user?.profile?.phone || '');
   const [address, setAddress] = useState('');
+  const [backPressCount, setBackPressCount] = useState(0);
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.replace('/');
-    } else if (user) {
-      fetchProfile();
+    // Check authentication before loading
+    if (!user) {
+      router.replace('/auth');
+      return;
     }
-  }, [user, loading]);
+    
+    fetchProfile();
+  }, [user]);
+
+  // Redirect if user becomes unauthenticated
+  useEffect(() => {
+    if (!user) {
+      router.replace('/auth');
+    }
+  }, [user]);
+
+  useEffect(() => {
+    // Handle back button press with exit confirmation
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      console.log('Back button pressed in vendor profile');
+      
+      // If we're in a nested screen, let it go back normally
+      if (router.canGoBack()) {
+        router.back();
+        return true;
+      }
+      
+      // From profile screen, handle exit confirmation
+      if (backPressCount === 0) {
+        setBackPressCount(1);
+        Alert.alert(
+          'Exit App',
+          'Press back again to exit the app',
+          [
+            {
+              text: 'Cancel',
+              onPress: () => setBackPressCount(0),
+              style: 'cancel',
+            },
+          ],
+          { cancelable: false }
+        );
+        
+        // Reset back press count after 2 seconds
+        setTimeout(() => {
+          setBackPressCount(0);
+        }, 2000);
+        
+        return true;
+      } else {
+        // Exit the app
+        BackHandler.exitApp();
+        return true;
+      }
+    });
+
+    return () => {
+      backHandler.remove();
+    };
+  }, [backPressCount]);
 
   const fetchProfile = async () => {
     if (!user) return;
@@ -44,11 +100,12 @@ export default function ProfileScreen() {
       setVendorType(data.vendor_type || '');
       if (data.latitude && data.longitude) setLocation({ latitude: data.latitude, longitude: data.longitude });
       setAddress(data.location_name || data.address || '');
+      setPhone(user?.profile?.phone || '');
     }
   };
 
   const handleSave = async () => {
-    if (!fullName || !shopName || !vendorType || !location) {
+    if (!fullName || !shopName || !vendorType || !location || !phone) {
       Alert.alert('Error', 'Please fill all fields and select location.');
       return;
     }
@@ -58,7 +115,8 @@ export default function ProfileScreen() {
       locationName = await LocationService.getLocationName(location.latitude, location.longitude);
       setAddress(locationName);
     }
-    const { error } = await supabase
+    // Upsert vendor_profile (auto-insert or update)
+    const { error: vendorProfileError } = await supabase
       .from('vendor_profile')
       .upsert({
         user_id: user.id,
@@ -67,11 +125,16 @@ export default function ProfileScreen() {
         vendor_type: vendorType,
         latitude: location.latitude,
         longitude: location.longitude,
-        location_name: locationName
+        location_name: locationName,
+        phone_number: phone // use phone_number for vendor_profile
       }, { onConflict: 'user_id' });
-    if (error) {
-      console.error('Supabase error:', error);
-      Alert.alert('Error', error.message || 'Failed to update profile');
+    // Update phone in users table
+    const { error: userError } = await supabase
+      .from('users')
+      .update({ phone })
+      .eq('id', user.id);
+    if (vendorProfileError || userError) {
+      Alert.alert('Error', (vendorProfileError || userError)?.message || 'Failed to update profile');
     } else {
       setEditing(false);
       fetchProfile();
@@ -91,7 +154,7 @@ export default function ProfileScreen() {
           onPress: async () => {
             try {
               await logout();
-              router.replace('/');
+              router.replace('/auth');
             } catch (error) {
               Alert.alert('Error', 'Failed to logout');
             }
@@ -135,6 +198,7 @@ export default function ProfileScreen() {
             <TextInput style={styles.input} placeholder="Full Name" value={fullName} onChangeText={setFullName} />
             <TextInput style={styles.input} placeholder="Shop Name" value={shopName} onChangeText={setShopName} />
             <TextInput style={styles.input} placeholder="Vendor Type" value={vendorType} onChangeText={setVendorType} />
+            <TextInput style={styles.input} placeholder="Phone Number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
             <TouchableOpacity style={styles.locationBtn} onPress={openMapPicker} disabled={gettingLocation}>
               <MapPin color="#F97316" size={20} />
               <Text style={styles.locationText}>{location ? `Lat: ${location.latitude.toFixed(4)}, Lon: ${location.longitude.toFixed(4)}` : gettingLocation ? 'Getting current location...' : 'Pick Shop Location'}</Text>
@@ -258,17 +322,20 @@ const styles = StyleSheet.create({
   },
   infoItem: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 12,
+  },
+  infoLabel: {
+    fontWeight: '600',
+    color: '#374151',
+    marginRight: 8,
+    minWidth: 80,
   },
   infoText: {
     fontSize: 16,
     color: '#6b7280',
-  },
-  infoLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
+    flex: 1,
+    flexWrap: 'wrap',
   },
   input: {
     borderWidth: 1,

@@ -7,6 +7,7 @@ import {
   RefreshControl,
   Alert,
   TouchableOpacity,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -15,27 +16,87 @@ import { Plus, Trash2 } from 'lucide-react-native';
 import DealCard from '@/components/ui/DealCard';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import Button from '@/components/ui/Button';
+import { useAuth } from '@/contexts/AuthContext';
+import { useFocusEffect } from '@react-navigation/native';
+import Dialog from 'react-native-dialog';
 
 export default function VendorScreen() {
+  const { user } = useAuth();
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [backPressCount, setBackPressCount] = useState(0);
+  const [dialogVisible, setDialogVisible] = useState(false);
+  const [dialogDeal, setDialogDeal] = useState<Deal | null>(null);
+  const [dialogValue, setDialogValue] = useState('');
+  const [dialogError, setDialogError] = useState('');
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBackPress = () => {
+        if (backPressCount === 0) {
+          setBackPressCount(1);
+          Alert.alert(
+            'Exit App',
+            'Press back again to exit the app',
+            [
+              {
+                text: 'Cancel',
+                onPress: () => setBackPressCount(0),
+                style: 'cancel',
+              },
+              {
+                text: 'Exit',
+                onPress: () => BackHandler.exitApp(),
+                style: 'destructive',
+              },
+            ],
+            { cancelable: false }
+          );
+          setTimeout(() => setBackPressCount(0), 2000);
+          return true;
+        } else {
+          BackHandler.exitApp();
+          return true;
+        }
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
+      return () => {
+        subscription.remove();
+      };
+    }, [backPressCount])
+  );
 
   useEffect(() => {
     loadDeals();
 
     const subscription = DealService.subscribeToDeals((payload) => {
-      console.log('Deal update:', payload);
       loadDeals();
     });
 
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
+  }, [user]);
+
+  // Redirect if user becomes unauthenticated
+  useEffect(() => {
+    if (!user) {
+      router.replace('/auth');
+    }
+  }, [user]);
 
   const loadDeals = async () => {
     try {
+      // Check if user is authenticated
+      if (!user) {
+        setDeals([]);
+        setLoading(false);
+        return;
+      }
+
       const response = await DealService.getVendorDeals();
       if (response.success && response.deals) {
         const now = new Date();
@@ -50,11 +111,9 @@ export default function VendorScreen() {
         }
         setDeals(activeDeals);
       } else {
-        console.log('No deals found or error:', response.message);
         setDeals([]);
       }
     } catch (error) {
-      console.error('Load deals error:', error);
       setDeals([]);
     } finally {
       setLoading(false);
@@ -120,6 +179,41 @@ export default function VendorScreen() {
     );
   };
 
+  const handleEditQuantity = (deal: Deal) => {
+    setDialogDeal(deal);
+    setDialogValue(deal.remaining_quantity.toString());
+    setDialogError('');
+    setDialogVisible(true);
+  };
+
+  const handleDialogCancel = () => {
+    setDialogVisible(false);
+    setDialogDeal(null);
+    setDialogValue('');
+    setDialogError('');
+  };
+
+  const handleDialogConfirm = async () => {
+    if (!dialogDeal) return;
+    const quantity = parseInt(dialogValue);
+    if (isNaN(quantity) || quantity < 0 || quantity > dialogDeal.quantity) {
+      setDialogError(`Quantity must be between 0 and ${dialogDeal.quantity}`);
+      return;
+    }
+    try {
+      const response = await DealService.updateDealQuantity(dialogDeal.id, quantity);
+      if (response.success) {
+        Alert.alert('Success', 'Quantity updated successfully!');
+        loadDeals();
+        handleDialogCancel();
+      } else {
+        setDialogError(response.message);
+      }
+    } catch (error) {
+      setDialogError('Failed to update quantity');
+    }
+  };
+
   const renderDealActions = (deal: Deal) => (
     <View style={styles.dealActions}>
       <View style={styles.statusContainer}>
@@ -142,6 +236,12 @@ export default function VendorScreen() {
 
       {deal.status === 'active' && (
         <View style={styles.actionButtons}>
+          <Button
+            title="Edit Quantity"
+            onPress={() => handleEditQuantity(deal)}
+            size="small"
+            variant="secondary"
+          />
           <Button
             title="Mark as Sold"
             onPress={() => handleMarkAsSold(deal.id)}
@@ -166,7 +266,7 @@ export default function VendorScreen() {
         deal={item}
         onPress={() => router.push({
           pathname: '/deal-details/[id]',
-          params: { id: item.id }
+          params: { id: item.id, from: 'vendor' }
         })}
         showDistance={false}
       />
@@ -223,6 +323,20 @@ export default function VendorScreen() {
         ListEmptyComponent={renderEmptyState}
         showsVerticalScrollIndicator={false}
       />
+      <Dialog.Container visible={dialogVisible}>
+        <Dialog.Title>Update Remaining Quantity</Dialog.Title>
+        <Dialog.Description>
+          Enter the remaining quantity (0-{dialogDeal?.quantity ?? 0}):
+        </Dialog.Description>
+        <Dialog.Input
+          value={dialogValue}
+          onChangeText={setDialogValue}
+          keyboardType="numeric"
+        />
+        {!!dialogError && <Text style={{ color: 'red', marginTop: 4 }}>{dialogError}</Text>}
+        <Dialog.Button label="Cancel" onPress={handleDialogCancel} />
+        <Dialog.Button label="Update" onPress={handleDialogConfirm} />
+      </Dialog.Container>
     </SafeAreaView>
   );
 }

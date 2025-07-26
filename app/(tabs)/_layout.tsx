@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { ShoppingBag, Store, Package, User } from 'lucide-react-native';
+import { ShoppingBag, Store, User } from 'lucide-react-native';
 
 export default function TabLayout() {
   const { user } = useAuth();
@@ -36,15 +36,6 @@ export default function TabLayout() {
             }}
           />
           <Tabs.Screen
-            name="orders"
-            options={{
-              title: 'Orders',
-              tabBarIcon: ({ size, color }) => (
-                <Package color={color} size={size} />
-              ),
-            }}
-          />
-          <Tabs.Screen
             name="profile"
             options={{
               title: 'Profile',
@@ -62,15 +53,6 @@ export default function TabLayout() {
               title: 'Discover',
               tabBarIcon: ({ size, color }) => (
                 <ShoppingBag color={color} size={size} />
-              ),
-            }}
-          />
-          <Tabs.Screen
-            name="buyer-orders"
-            options={{
-              title: 'My Orders',
-              tabBarIcon: ({ size, color }) => (
-                <Package color={color} size={size} />
               ),
             }}
           />
