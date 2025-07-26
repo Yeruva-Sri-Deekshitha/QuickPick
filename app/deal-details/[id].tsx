@@ -15,6 +15,7 @@ import { DealService, Deal } from '@/services/dealService';
 
 import { useAuth } from '@/contexts/AuthContext';
 import * as Linking from 'expo-linking';
+import * as Location from 'expo-location';
 import { 
   ArrowLeft,
   MapPin,
@@ -155,6 +156,26 @@ export default function DealDetailsScreen() {
     } catch (error) {
       setDialogError('Failed to update quantity');
     }
+  };
+
+  // Add navigation handler for buyers
+  const handleNavigateToShop = async () => {
+    if (!deal || !deal.latitude || !deal.longitude) {
+      Alert.alert('Error', 'Vendor location not available');
+      return;
+    }
+    let { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission denied', 'Permission to access location was denied');
+      return;
+    }
+    let location = await Location.getCurrentPositionAsync({});
+    const buyerLat = location.coords.latitude;
+    const buyerLng = location.coords.longitude;
+    const vendorLat = deal.latitude;
+    const vendorLng = deal.longitude;
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${buyerLat},${buyerLng}&destination=${vendorLat},${vendorLng}&travelmode=driving`;
+    Linking.openURL(url);
   };
 
   useEffect(() => {
@@ -346,15 +367,26 @@ export default function DealDetailsScreen() {
               </View>
             </View>
 
-            {/* Only for buyers: Call Vendor */}
-            {user?.profile.role === 'buyer' && vendor?.phone && (
+            {/* Only for buyers: Call Vendor and Navigate to Shop */}
+            {user?.profile.role === 'buyer' && (
               <View style={styles.buyerActions}>
-                <TouchableOpacity
-                  style={styles.callButton}
-                  onPress={() => Linking.openURL(`tel:${vendor.phone}`)}
-                >
-                  <Text style={styles.callButtonText}>Call Vendor</Text>
-                </TouchableOpacity>
+                {vendor?.phone && (
+                  <TouchableOpacity
+                    style={styles.callButton}
+                    onPress={() => Linking.openURL(`tel:${vendor.phone}`)}
+                  >
+                    <Text style={styles.callButtonText}>Call Vendor</Text>
+                  </TouchableOpacity>
+                )}
+                {/* Navigate to Shop Button */}
+                {deal.latitude && deal.longitude && (
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={handleNavigateToShop}
+                  >
+                    <Text style={styles.actionButtonText}>Navigate to Shop</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
           </View>
