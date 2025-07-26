@@ -1,6 +1,5 @@
 # 🛍️ QuickPick – Last-Minute Local Food Deals App
 
-![QuickPick Banner](https://your-cdn.com/quickpick-banner.png)
 
 QuickPick is a mobile-first marketplace that helps **local vendors sell last-minute food deals** to nearby **buyers**, reducing food waste while supporting small businesses.
 
@@ -27,7 +26,8 @@ Built with **React Native (Expo)** and **Supabase**, the app connects people in 
 ## 📲 App Flow
 
 1. **Onboarding**  
-   - Choose role (Buyer or Vendor)  
+   - Choose role (Buyer or Vendor)
+   - Provide the details to register
    - Profile setup (Vendor fills shop details)
 
 2. **Authentication**  
@@ -82,8 +82,8 @@ QuickPick/
 ### 1. Clone the Repo
 
 ```bash
-git clone https://github.com/Vemula-VaraLakshmi/QuickPick-food-vendoring-mobile-app.git
-cd QuickPick-food-vendoring-mobile-app
+git clone https://github.com/Yeruva-Sri-Deekshitha/QuickPick.git
+cd QuickPick
 ```
 
 ### 2. Install Dependencies
@@ -118,13 +118,15 @@ Scan the QR from your phone (Expo Go app) to open the app.
 ### Tables
 
 - **users**
-  - `id`, `email`, `role` (buyer/vendor)
+  - `id`,`name`, `email`, `role` (buyer/vendor)
 
 - **vendor_profile**
-  - `user_id`, `shop_name`, `location_name`, `phone_number`
+  - `user_id`, `full_name`, `vendor_type`, `shop_name`, `latitude`, `longitude`, `location_name`, `phone_number`
 
 - **deals**
-  - `id`, `vendor_id`, `item_name`, `discounted_price`, `expiry_time`, `image_url`, etc.
+  - `id`, `vendor_id`, `item_name`, `quantity`, `discount_percent`, `original_price`, `discounted_price`, `expiry_time`, `image_url`, `status`, `deal_title`, etc..
+- **buyer_profile**
+   - `id`, `user_id`, `full_name`, `latitude`, `longitude`.
 
 ### RPC Function
 
@@ -161,7 +163,7 @@ To simulate the full app experience:
 git init
 
 # Add your remote repo
-git remote add origin https://github.com/YOUR_USERNAME/QuickPick-food-vendoring-mobile-app.git
+git remote add origin https://github.com/YOUR_USERNAME/QuickPick.git
 
 # Add files and commit
 git add .
