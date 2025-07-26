@@ -1,19 +1,16 @@
 import 'dotenv/config';
 
-console.log("🧪 Supabase URL:", process.env.EXPO_PUBLIC_SUPABASE_URL);
-console.log("🧪 Supabase Key:", process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
-
 export default {
   expo: {
-    name: "QuickPickall",
-    slug: "quickpickall",
+    name: "QuikPick",
+    slug: "quikpick",
     version: "1.0.0",
     scheme: "quickpickall",
     orientation: "portrait",
     userInterfaceStyle: "automatic",
     icon: "./assets/images/icon.png",
     splash: {
-      image: "./assets/images/splash.png",
+      image: "./assets/images/icon.png",
       resizeMode: "contain",
       backgroundColor: "#ffffff"
     },
