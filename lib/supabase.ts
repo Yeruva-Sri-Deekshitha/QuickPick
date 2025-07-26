@@ -45,6 +45,8 @@ export type Database = {
           vendor_id: string;
           item_name: string;
           quantity: number;
+          quantity_unit: string;
+          remaining_quantity: number;
           discount_percent: number;
           original_price: number;
           discounted_price: number;
@@ -62,6 +64,8 @@ export type Database = {
           vendor_id: string;
           item_name: string;
           quantity: number;
+          quantity_unit?: string;
+          remaining_quantity?: number;
           discount_percent: number;
           original_price: number;
           discounted_price: number;
@@ -79,6 +83,8 @@ export type Database = {
           vendor_id?: string;
           item_name?: string;
           quantity?: number;
+          quantity_unit?: string;
+          remaining_quantity?: number;
           discount_percent?: number;
           original_price?: number;
           discounted_price?: number;
