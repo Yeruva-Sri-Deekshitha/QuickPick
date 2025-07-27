@@ -33,6 +33,12 @@ CREATE POLICY "Users can manage their OTPs"
   TO anon
   USING (true);
 
+-- Allow inserts for everyone (for dev only!)
+CREATE POLICY "Allow insert for all (dev only)" ON otps
+FOR INSERT
+TO public, anon
+USING (true);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS otps_phone_number_idx ON otps(phone_number);
 CREATE INDEX IF NOT EXISTS otps_created_at_idx ON otps(created_at);

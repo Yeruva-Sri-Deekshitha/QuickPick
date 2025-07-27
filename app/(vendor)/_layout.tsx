@@ -17,7 +17,7 @@ export default function VendorLayout() {
       }}
     >
       <Tabs.Screen
-        name="vendor" // app/vendor/index.tsx
+        name="vendor"
         options={{
           title: 'My Deals',
           tabBarIcon: ({ color, size }) => (
@@ -26,7 +26,16 @@ export default function VendorLayout() {
         }}
       />
       <Tabs.Screen
-        name="profile" // app/vendor/profile.tsx
+        name="post-deal"
+        options={{
+          title: 'Post Deal',
+          tabBarIcon: ({ color, size }) => (
+            <PlusCircle color={color} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
         options={{
           title: 'Profile',
           tabBarIcon: ({ color, size }) => (
