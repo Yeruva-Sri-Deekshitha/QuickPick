@@ -7,6 +7,9 @@ Built with **React Native (Expo)** and **Supabase**, the app connects people in 
 
 ---
 
+[![Watch the video](https://img.youtube.com/vi/9K6QiIw5fTA/maxresdefault.jpg)](https://youtu.be/9K6QiIw5fTA?si=Wz5AzmqX0k65D7s6)
+
+
 ## 🚀 Key Features
 
 ### 👤 Roles
